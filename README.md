@@ -43,6 +43,10 @@ ollama pull nomic-embed-text
 
 If Ollama is not installed or running, install/open Ollama and run those commands before starting AI Router.
 
+## Choose Ollama models
+
+You can use other models supported by Ollama. Set the model names for each role in `config.py`: `CHAT_MODEL`, `EMBED_MODEL`, `ROUTER_MODEL`, `EVALUATOR_MODEL`, `MEMORY_EXTRACTOR_MODEL`, and `MEMORY_SCORER_MODEL`. Pull each selected model with `ollama pull <model-name>` before running the app. Choose an embedding model for `EMBED_MODEL` and chat-capable models for the other roles. The installer only pulls the default models listed above.
+
 ## Configure
 
 Edit `.env` and set `OPENAI_API_KEY` if you want cloud routing:
