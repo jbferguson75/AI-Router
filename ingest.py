@@ -486,6 +486,35 @@ def _ingest_file_unlocked(path):
     )
 
     try:
+        if path.stat().st_size == 0:
+            old_chunk_ids = get_document_chunk_ids(path)
+            cached_entry = hash_cache.get(source)
+            cached_chunk_count = (
+                cached_entry.get("chunk_count")
+                if isinstance(cached_entry, dict)
+                else None
+            )
+            has_previous_index = bool(old_chunk_ids) or (
+                isinstance(cached_entry, dict)
+                and "hash" in cached_entry
+            )
+            preserved_chunk_count = (
+                len(old_chunk_ids)
+                if old_chunk_ids
+                else cached_chunk_count or 0
+            )
+            record_index_status(
+                source,
+                "ready" if has_previous_index else "online_only",
+                chunk_count=preserved_chunk_count,
+                availability="online_only"
+            )
+            print(
+                f"Skipping zero-byte file {path.name}; "
+                "keeping its previous index if present."
+            )
+            return True
+
         current_hash = calculate_file_hash(path)
         old_chunk_ids = get_document_chunk_ids(path)
     except Exception as ex:

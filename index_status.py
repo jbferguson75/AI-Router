@@ -20,7 +20,13 @@ def get_index_status():
         return {}
 
 
-def record_index_status(path, status, error=None, chunk_count=None):
+def record_index_status(
+    path,
+    status,
+    error=None,
+    chunk_count=None,
+    availability=None
+):
     """Atomically record the latest indexing state for one source file."""
     path_key = str(path)
     with _STATUS_LOCK:
@@ -33,6 +39,8 @@ def record_index_status(path, status, error=None, chunk_count=None):
             entry["error"] = str(error)[:500]
         if chunk_count is not None:
             entry["chunk_count"] = chunk_count
+        if availability is not None:
+            entry["availability"] = availability
         statuses[path_key] = entry
 
         # Keep this operational file bounded over long-running sessions.

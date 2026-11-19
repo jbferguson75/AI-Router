@@ -114,6 +114,10 @@ Let the orchestrator choose.
         1 for entry in index_status.values()
         if entry.get("status") == "indexing"
     )
+    online_only_count = sum(
+        1 for entry in index_status.values()
+        if entry.get("availability") == "online_only"
+    )
     failed_entries = [
         (path, entry)
         for path, entry in index_status.items()
@@ -121,6 +125,7 @@ Let the orchestrator choose.
     ]
     st.write(f"Indexed files: {ready_count}")
     st.write(f"Currently indexing: {indexing_count}")
+    st.write(f"Online-only files: {online_only_count}")
     if failed_entries:
         st.error(f"Indexing errors: {len(failed_entries)}")
         with st.expander("Review indexing errors"):
