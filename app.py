@@ -2,6 +2,7 @@ import logging
 
 import streamlit as st
 
+import conversation_store
 from orchestrator import ask, approve_openai_request
 
 from memory import (
@@ -33,11 +34,118 @@ st.set_page_config(
 # Session State
 # --------------------------------------------------
 
+conversation_store.initialize()
+
+if "active_conversation_id" not in st.session_state:
+    existing_messages = st.session_state.get("messages", [])
+    conversations = conversation_store.list_conversations()
+    if conversations:
+        initial_conversation = conversations[0]
+        conversation_id = initial_conversation["id"]
+    else:
+        conversation_id = conversation_store.create_conversation()
+        initial_conversation = conversation_store.get_conversation(
+            conversation_id
+        )
+
+    if existing_messages and not conversation_store.get_messages(conversation_id):
+        for message in existing_messages:
+            conversation_store.add_message(conversation_id, message)
+        initial_conversation = conversation_store.get_conversation(
+            conversation_id
+        )
+
+    st.session_state.active_conversation_id = conversation_id
+    st.session_state.messages = conversation_store.get_messages(conversation_id)
+    st.session_state.pending_openai = conversation_store.get_pending_request(
+        conversation_id
+    )
+    st.session_state.conversation_selector = conversation_id
+    st.session_state.conversation_title_input = initial_conversation["title"]
+    st.session_state.confirm_delete_conversation = False
+
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = conversation_store.get_messages(
+        st.session_state.active_conversation_id
+    )
 
 if "pending_openai" not in st.session_state:
+    st.session_state.pending_openai = conversation_store.get_pending_request(
+        st.session_state.active_conversation_id
+    )
+
+
+def append_message(message):
+    st.session_state.messages.append(message)
+    conversation_store.add_message(
+        st.session_state.active_conversation_id,
+        message
+    )
+
+
+def switch_conversation():
+    conversation_id = st.session_state.conversation_selector
+    if conversation_id == st.session_state.active_conversation_id:
+        return
+
+    conversation = conversation_store.get_conversation(conversation_id)
+    if conversation is None:
+        return
+
+    st.session_state.active_conversation_id = conversation_id
+    st.session_state.messages = conversation_store.get_messages(conversation_id)
+    st.session_state.pending_openai = conversation_store.get_pending_request(
+        conversation_id
+    )
+    st.session_state.conversation_title_input = conversation["title"]
+    st.session_state.confirm_delete_conversation = False
+
+
+def create_new_conversation():
+    conversation_id = conversation_store.create_conversation()
+    st.session_state.active_conversation_id = conversation_id
+    st.session_state.messages = []
     st.session_state.pending_openai = None
+    st.session_state.conversation_selector = conversation_id
+    st.session_state.conversation_title_input = conversation_store.DEFAULT_TITLE
+    st.session_state.confirm_delete_conversation = False
+
+
+def rename_active_conversation():
+    conversation_store.rename_conversation(
+        st.session_state.active_conversation_id,
+        st.session_state.conversation_title_input
+    )
+
+
+def request_conversation_delete():
+    st.session_state.confirm_delete_conversation = True
+
+
+def cancel_conversation_delete():
+    st.session_state.confirm_delete_conversation = False
+
+
+def confirm_conversation_delete():
+    conversation_store.delete_conversation(
+        st.session_state.active_conversation_id
+    )
+    conversations = conversation_store.list_conversations()
+    if conversations:
+        conversation_id = conversations[0]["id"]
+        conversation = conversations[0]
+    else:
+        conversation_id = conversation_store.create_conversation()
+        conversation = conversation_store.get_conversation(conversation_id)
+
+    st.session_state.active_conversation_id = conversation_id
+    st.session_state.messages = conversation_store.get_messages(conversation_id)
+    st.session_state.pending_openai = conversation_store.get_pending_request(
+        conversation_id
+    )
+    st.session_state.conversation_selector = conversation_id
+    st.session_state.conversation_title_input = conversation["title"]
+    st.session_state.confirm_delete_conversation = False
 
 # --------------------------------------------------
 # Header
@@ -57,13 +165,95 @@ with st.sidebar:
 
     st.header("Controls")
 
-    if st.button(
-        "Clear Conversation",
-        use_container_width=True
-    ):
-        st.session_state.messages = []
-        st.session_state.pending_openai = None
-        st.rerun()
+    st.subheader("Conversations")
+    st.button(
+        "New conversation",
+        key="new_conversation",
+        width="stretch",
+        on_click=create_new_conversation
+    )
+
+    conversations = conversation_store.list_conversations()
+    conversation_titles = {
+        conversation["id"]: conversation["title"]
+        for conversation in conversations
+    }
+    if st.session_state.active_conversation_id not in conversation_titles:
+        if not conversations:
+            conversation_id = conversation_store.create_conversation()
+            conversations = conversation_store.list_conversations()
+            conversation_titles = {
+                conversation["id"]: conversation["title"]
+                for conversation in conversations
+            }
+        replacement_id = conversations[0]["id"]
+        st.session_state.conversation_selector = replacement_id
+        st.session_state.active_conversation_id = replacement_id
+        st.session_state.messages = conversation_store.get_messages(
+            replacement_id
+        )
+        st.session_state.pending_openai = conversation_store.get_pending_request(
+            replacement_id
+        )
+        st.session_state.conversation_title_input = conversations[0]["title"]
+
+    conversation_ids = list(conversation_titles)
+    if st.session_state.get("conversation_selector") not in conversation_ids:
+        st.session_state.conversation_selector = (
+            st.session_state.active_conversation_id
+        )
+    st.selectbox(
+        "Saved conversations",
+        options=conversation_ids,
+        format_func=lambda conversation_id: conversation_titles.get(
+            conversation_id,
+            "Conversation"
+        ),
+        key="conversation_selector",
+        on_change=switch_conversation
+    )
+
+    active_conversation = conversation_store.get_conversation(
+        st.session_state.active_conversation_id
+    )
+    if "conversation_title_input" not in st.session_state:
+        st.session_state.conversation_title_input = active_conversation["title"]
+    with st.form("rename_conversation_form"):
+        st.text_input(
+            "Conversation title",
+            key="conversation_title_input"
+        )
+        st.form_submit_button(
+            "Rename conversation",
+            on_click=rename_active_conversation
+        )
+
+    if not st.session_state.confirm_delete_conversation:
+        st.button(
+            "Delete conversation",
+            key="delete_conversation",
+            on_click=request_conversation_delete
+        )
+    else:
+        st.warning(
+            f"Delete ‘{active_conversation['title']}’ and its messages?"
+        )
+        confirm_col, keep_col = st.columns(2)
+        with confirm_col:
+            st.button(
+                "Delete",
+                key="confirm_delete_conversation_button",
+                type="primary",
+                width="stretch",
+                on_click=confirm_conversation_delete
+            )
+        with keep_col:
+            st.button(
+                "Keep it",
+                key="cancel_delete_conversation_button",
+                width="stretch",
+                on_click=cancel_conversation_delete
+            )
 
     st.divider()
 
@@ -247,21 +437,29 @@ if st.session_state.pending_openai:
                 f"**Route:** {approved_result['route']}\n\n"
                 f"{approved_result['answer']}"
             )
-            st.session_state.messages.append({
+            append_message({
                 "role": "assistant",
                 "content": answer,
                 "sources": approved_result["sources"]
             })
             st.session_state.pending_openai = None
+            conversation_store.set_pending_request(
+                st.session_state.active_conversation_id,
+                None
+            )
             st.rerun()
 
     if cancel_clicked:
-        st.session_state.messages.append({
+        append_message({
             "role": "assistant",
             "content": "OpenAI request cancelled. Nothing was sent.",
             "sources": []
         })
         st.session_state.pending_openai = None
+        conversation_store.set_pending_request(
+            st.session_state.active_conversation_id,
+            None
+        )
         st.rerun()
 
 # --------------------------------------------------
@@ -279,12 +477,10 @@ if prompt:
     # Store User Message
     #
 
-    st.session_state.messages.append(
-        {
-            "role": "user",
-            "content": prompt
-        }
-    )
+    append_message({
+        "role": "user",
+        "content": prompt
+    })
 
     with st.chat_message(
         "user"
@@ -330,15 +526,13 @@ if prompt:
         ):
             st.markdown(answer)
 
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": answer,
-                "sources": []
-            }
-        )
+        append_message({
+            "role": "assistant",
+            "content": answer,
+            "sources": []
+        })
 
-        st.stop()
+        st.rerun()
 
     if prompt.strip() == "/memories":
 
@@ -374,15 +568,13 @@ if prompt:
         ):
             st.markdown(answer)
 
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": answer,
-                "sources": []
-            }
-        )
+        append_message({
+            "role": "assistant",
+            "content": answer,
+            "sources": []
+        })
 
-        st.stop()
+        st.rerun()
 
     if prompt.startswith(
         "/forget "
@@ -418,15 +610,13 @@ if prompt:
         ):
             st.markdown(answer)
 
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": answer,
-                "sources": []
-            }
-        )
+        append_message({
+            "role": "assistant",
+            "content": answer,
+            "sources": []
+        })
 
-        st.stop()
+        st.rerun()
 
     # ==================================================
     # ROUTE OVERRIDES
@@ -509,6 +699,10 @@ if prompt:
                     "OpenAI approval is required. Review the request below before it is sent."
                 )
                 st.session_state.pending_openai = result
+                conversation_store.set_pending_request(
+                    st.session_state.active_conversation_id,
+                    result
+                )
             st.markdown(answer)
 
             # --------------------------------------
@@ -578,13 +772,10 @@ if prompt:
     # Store Assistant Response
     # --------------------------------------------------
 
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": answer,
-            "sources": result["sources"]
-        }
-    )
+    append_message({
+        "role": "assistant",
+        "content": answer,
+        "sources": result["sources"]
+    })
 
-    if result.get("confirmation_required"):
-        st.rerun()
+    st.rerun()

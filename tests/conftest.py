@@ -162,10 +162,17 @@ def isolate_local_state(tmp_path, monkeypatch):
     # Import only after substituting chromadb so imports never open ./chroma_db.
     import index_status
     import ingest
+    import conversation_store
 
     monkeypatch.setattr(index_status, "STATUS_FILE", tmp_path / "index-status.json")
     monkeypatch.setattr(ingest, "HASH_CACHE_FILE", tmp_path / "hash-cache.json")
     monkeypatch.setattr(ingest, "INDEX_LOCK_FILE", tmp_path / "index-write.lock")
+    monkeypatch.setattr(
+        conversation_store,
+        "DB_PATH",
+        tmp_path / "conversations.sqlite3"
+    )
+    monkeypatch.setattr(conversation_store, "_INITIALIZED", False)
     ingest.hash_cache.clear()
     yield
 

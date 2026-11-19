@@ -99,3 +99,31 @@ def test_app_cancel_does_not_send_pending_request(monkeypatch):
     assert sent == []
     assert at.session_state["pending_openai"] is None
     assert any("OpenAI request cancelled" in item.value for item in at.markdown)
+
+
+def test_app_can_create_and_switch_saved_conversations(monkeypatch):
+    monkeypatch.setattr(orchestrator, "ask", lambda **_kwargs: {
+        "route": "LOCAL",
+        "answer": "Saved answer",
+        "sources": [],
+        "answer_score": None,
+        "memory_saved": None,
+        "memory_score": None
+    })
+
+    at = AppTest.from_file(str(APP_FILE)).run()
+    first_conversation = at.session_state["active_conversation_id"]
+    at.chat_input[0].set_value("first conversation question").run()
+    assert not at.exception
+
+    at.button(key="new_conversation").click().run()
+    second_conversation = at.session_state["active_conversation_id"]
+    assert second_conversation != first_conversation
+    assert at.session_state["messages"] == []
+
+    at.selectbox(key="conversation_selector").set_value(first_conversation).run()
+    assert at.session_state["active_conversation_id"] == first_conversation
+    assert at.session_state["messages"][0]["content"] == (
+        "first conversation question"
+    )
+    assert any("Saved answer" in item.value for item in at.markdown)

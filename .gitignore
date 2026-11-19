@@ -228,6 +228,7 @@ __marimo__/
 
 # Local application data
 chroma_db/
+conversations.sqlite3*
 .file_hash_cache.json
 .index_status.json
 .document_index.lock

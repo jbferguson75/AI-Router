@@ -59,6 +59,8 @@ Local document search and answers use Ollama. Requests sent to OpenAI require th
 
 Add your own `.txt`, `.md`, `.pdf`, `.docx`, `.pptx`, or `.xlsx` files under `documents/`. The watcher indexes new and changed files automatically. The documents and Chroma database stay on the local machine and are excluded from Git.
 
+Conversations are saved in a local SQLite database. Use the sidebar to create, select, rename, and delete conversations. Conversation history and pending OpenAI approval requests stay on this computer and are excluded from Git.
+
 ## Run
 
 From the project directory, start the app using the command for your operating system:
