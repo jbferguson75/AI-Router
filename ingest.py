@@ -1,5 +1,4 @@
 import hashlib
-import fcntl
 import json
 import os
 import time
@@ -17,6 +16,7 @@ from docx import Document
 from pptx import Presentation
 from openpyxl import load_workbook
 from index_status import record_index_status
+from file_lock import acquire_file_lock, release_file_lock
 
 from config import (
     DOCUMENT_DIR,
@@ -90,12 +90,12 @@ hash_cache = load_hash_cache()
 @contextmanager
 def index_write_lock():
     lock_path = Path(INDEX_LOCK_FILE)
-    with lock_path.open("a+") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    with lock_path.open("a+b") as lock_file:
+        acquire_file_lock(lock_file)
         try:
             yield
         finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            release_file_lock(lock_file)
 
 
 def refresh_hash_cache():

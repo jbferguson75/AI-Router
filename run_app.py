@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import atexit
-import fcntl
 import os
 import signal
 import subprocess
 import sys
 import threading
 from pathlib import Path
+
+from file_lock import acquire_file_lock
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -29,9 +30,14 @@ def stop_process(process, name):
 
     print(f"Stopping {name}...")
     try:
-        process.send_signal(signal.SIGTERM)
-    except ProcessLookupError:
-        return
+        if os.name == "nt":
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            process.send_signal(signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        if process.poll() is not None:
+            return
+        process.terminate()
 
     try:
         process.wait(timeout=15)
@@ -42,18 +48,14 @@ def stop_process(process, name):
 
 
 def acquire_instance_lock():
-    lock_file = (PROJECT_DIR / ".ai_router.lock").open("a+")
+    lock_file = (PROJECT_DIR / ".ai_router.lock").open("a+b")
     try:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        acquire_file_lock(lock_file, blocking=False)
     except BlockingIOError:
         lock_file.close()
         print("AI Router is already running from this project directory.")
         return None
 
-    lock_file.seek(0)
-    lock_file.truncate()
-    lock_file.write(f"{os.getpid()}\n")
-    lock_file.flush()
     atexit.register(lock_file.close)
     return lock_file
 
@@ -75,15 +77,22 @@ def main():
     signal.signal(signal.SIGINT, request_shutdown)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, request_shutdown)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, request_shutdown)
 
     watcher = None
     streamlit = None
     exit_code = 0
 
     try:
+        process_group_options = (
+            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+            if os.name == "nt" else {}
+        )
         watcher = subprocess.Popen(
             [sys.executable, str(watcher_script)],
-            cwd=PROJECT_DIR
+            cwd=PROJECT_DIR,
+            **process_group_options
         )
         print("Document watcher started.")
 
@@ -95,7 +104,8 @@ def main():
                 "run",
                 str(app_script)
             ],
-            cwd=PROJECT_DIR
+            cwd=PROJECT_DIR,
+            **process_group_options
         )
         print("Streamlit app starting at http://localhost:8501")
 
@@ -123,6 +133,11 @@ def main():
         return 130
     if shutdown_signal == getattr(signal, "SIGTERM", None):
         return 143
+    if (
+        shutdown_signal is not None
+        and shutdown_signal == getattr(signal, "SIGBREAK", None)
+    ):
+        return 130
     return exit_code
 
 

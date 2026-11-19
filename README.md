@@ -4,7 +4,7 @@ AI Router is a local Streamlit app that searches documents indexed on your compu
 
 ## Requirements
 
-- macOS or Linux (Windows is not supported by the current process-locking code)
+- macOS, Linux, or Windows
 - Python 3.11
 - [Ollama](https://ollama.com/download) installed and running
 - The Ollama models `qwen2.5:3b` and `nomic-embed-text`
@@ -12,12 +12,24 @@ AI Router is a local Streamlit app that searches documents indexed on your compu
 
 ## Install
 
-Clone the repository into a folder named `ai-router` and run the installer:
+Clone the repository into a folder named `ai-router` and run the installer for your operating system.
+
+### macOS and Linux
 
 ```bash
 git clone https://github.com/jbferguson75/AI-Router.git ai-router
 cd ai-router
 ./install.sh
+```
+
+### Windows
+
+In PowerShell, run:
+
+```powershell
+git clone https://github.com/jbferguson75/AI-Router.git ai-router
+cd ai-router
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 The installer creates a local `.venv`, installs the pinned runtime dependencies from `requirements-lock.txt`, creates `.env` from `.env.example` if needed, and creates the `documents/` folder. It does not install Ollama or overwrite an existing `.env`.
@@ -45,10 +57,16 @@ Add your own `.txt`, `.md`, `.pdf`, `.docx`, `.pptx`, or `.xlsx` files under `do
 
 ## Run
 
-From the project directory:
+From the project directory, start the app using the command for your operating system:
 
 ```bash
 ./.venv/bin/python run_app.py
+```
+
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe .\run_app.py
 ```
 
 Open [http://localhost:8501](http://localhost:8501). Stop the app with Ctrl+C in the terminal.
@@ -62,8 +80,15 @@ Install development tools into the environment created by the installer and run 
 ./.venv/bin/python -m pytest -q
 ```
 
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
 Tests use a fake in-memory Chroma database and mock model/API calls; they do not need Ollama or an OpenAI key.
 
 ## Configuration
 
-Application models, routing thresholds, and behavior switches are in `config.py`. Runtime dependencies are listed in `requirements.txt`; `requirements-lock.txt` pins the resolved versions used by the installer. Regenerate the lock when changing runtime dependencies, then validate installation on Python 3.11 for macOS and Linux.
+Application models, routing thresholds, and behavior switches are in `config.py`. Runtime dependencies are listed in `requirements.txt`; `requirements-lock.txt` pins the resolved versions used by both installers. The lock excludes `uvloop` on Windows, where it is not supported. Regenerate the lock when changing runtime dependencies, then validate installation on Python 3.11 for macOS, Linux, and Windows.

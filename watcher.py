@@ -1,8 +1,6 @@
 """Watch the documents folder and serialize reliable index updates."""
 
 import signal
-import fcntl
-import os
 import threading
 import time
 from pathlib import Path
@@ -11,6 +9,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from config import DOCUMENT_DIR
+from file_lock import acquire_file_lock
 from index_status import record_index_status
 from ingest import (
     ingest_documents,
@@ -30,18 +29,14 @@ RECONCILE_KEY = "__reconcile_documents__"
 
 def acquire_watcher_lock():
     lock_path = Path(__file__).resolve().parent / ".document_watcher.lock"
-    lock_file = lock_path.open("a+")
+    lock_file = lock_path.open("a+b")
     try:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        acquire_file_lock(lock_file, blocking=False)
     except BlockingIOError:
         lock_file.close()
         print("A document watcher is already running for this project.")
         return None
 
-    lock_file.seek(0)
-    lock_file.truncate()
-    lock_file.write(f"{os.getpid()}\n")
-    lock_file.flush()
     return lock_file
 
 
@@ -274,6 +269,8 @@ def main():
     signal.signal(signal.SIGINT, request_shutdown)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, request_shutdown)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, request_shutdown)
 
     ingestion_queue = IngestionQueue()
     observer = Observer()
