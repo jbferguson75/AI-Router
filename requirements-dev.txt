@@ -1,2 +1,4 @@
--r requirements.txt
-pytest>=8,<10
+-r requirements-lock.txt
+pytest==9.2.0
+iniconfig==2.3.1
+pluggy==1.7.0
