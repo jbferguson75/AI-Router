@@ -23,6 +23,36 @@ def test_memory_rejects_blank_text():
     assert memory.save_memory("  ") is False
 
 
+def test_memory_rejects_extraction_output_and_query_summaries():
+    assert memory.save_memory(
+        "Output: User is inquiring about a rebuild kit recommendation."
+    ) is False
+    assert memory.save_memory("User is asking about a rebuild kit.") is False
+
+
+def test_memory_search_filters_unrelated_and_non_fact_memories(
+    monkeypatch, memory_collection
+):
+    monkeypatch.setattr(memory, "get_embedding", lambda _text: [1.0, 0.0])
+    memory_collection.add(
+        ids=["relevant", "irrelevant", "query-summary"],
+        documents=[
+            "User owns a 1980 Corvette.",
+            "User's daughter owns a barber shop.",
+            "Output: User is inquiring about a rebuild kit recommendation."
+        ],
+        embeddings=[
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0]
+        ]
+    )
+
+    assert memory.search_memory("What year is the Corvette?") == [
+        "User owns a 1980 Corvette."
+    ]
+
+
 def test_memory_filter_accepts_score_at_threshold(monkeypatch):
     monkeypatch.setattr(memory_filter, "ollama_chat", lambda **_kwargs: ollama_text("60"))
 
@@ -79,3 +109,22 @@ def test_answer_evaluator_fails_closed_on_invalid_output(monkeypatch):
     monkeypatch.setattr(answer_evaluator, "ollama_chat", lambda **_kwargs: ollama_text("75/100"))
 
     assert answer_evaluator.score_answer("q", "context", "answer") == 0
+
+
+def test_answer_evaluator_does_not_treat_abstention_as_contradiction(monkeypatch):
+    monkeypatch.setattr(
+        answer_evaluator,
+        "ollama_chat",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("abstentions should use the deterministic score")
+        )
+    )
+
+    score = answer_evaluator.score_answer(
+        "What year is my Corvette?",
+        "1980 Corvette Maintenance Notes",
+        "I don't know based on the provided documents."
+    )
+
+    assert score == answer_evaluator.HYBRID_ACCEPT_THRESHOLD
+    assert answer_evaluator.recommend_route(score) == "HYBRID"

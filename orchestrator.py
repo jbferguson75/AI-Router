@@ -30,16 +30,15 @@ from config import (
 # Memory Injection
 # --------------------------------------------------
 
-def inject_memory(question):
+def inject_memory(question, memory_context=None):
 
     if not ENABLE_MEMORY_INJECTION:
         if DEBUG_MEMORY:
             print("[MEMORY] injection disabled")
         return question
 
-    memory_context = build_memory_context(
-        question
-    )
+    if memory_context is None:
+        memory_context = build_memory_context(question)
 
     if not memory_context:
         return question
@@ -95,6 +94,10 @@ def _stage_openai_request(
     route,
     prompt,
     local_result=None,
+    fallback_result=None,
+    fallback_question=None,
+    fallback_history=None,
+    fallback_memory_context=None,
     answer_score=None,
     answer_route=None
 ):
@@ -118,7 +121,11 @@ def _stage_openai_request(
             "sources": sources,
             "context": context,
             "answer_score": answer_score,
-            "answer_route": answer_route
+            "answer_route": answer_route,
+            "local_fallback": fallback_result or local_result,
+            "fallback_question": fallback_question,
+            "fallback_history": fallback_history or [],
+            "fallback_memory_context": fallback_memory_context or ""
         }
     }
 
@@ -151,6 +158,31 @@ def approve_openai_request(pending_openai):
     result["confirmation_required"] = False
     return result
 
+
+def cancel_openai_request(staged_request):
+    """Return a local RAG response without sending the staged prompt to OpenAI."""
+    pending = staged_request.get("pending_openai", staged_request)
+    local_result = pending.get("local_fallback")
+
+    if local_result is None:
+        local_result = ask_local(
+            question=pending.get("fallback_question") or "",
+            history=pending.get("fallback_history") or [],
+            memory_context=pending.get("fallback_memory_context") or ""
+        )
+
+    result = dict(local_result)
+    result["route"] = "LOCAL"
+    result["answer_route"] = "LOCAL"
+    result["answer_score"] = staged_request.get(
+        "answer_score",
+        result.get("answer_score")
+    )
+    result["memory_saved"] = staged_request.get("memory_saved")
+    result["memory_score"] = staged_request.get("memory_score")
+    result["confirmation_required"] = False
+    return result
+
 # --------------------------------------------------
 # Main Entry Point
 # --------------------------------------------------
@@ -178,8 +210,13 @@ def ask(
     # Inject Retrieved Memory
     # ---------------------------------------------
 
+    memory_context = ""
+    if ENABLE_MEMORY_INJECTION:
+        memory_context = build_memory_context(question)
+
     enriched_question = inject_memory(
-        question
+        question,
+        memory_context=memory_context
     )
 
     # ==================================================
@@ -200,8 +237,9 @@ def ask(
 
         if route == "LOCAL":
             result = ask_local(
-                question=enriched_question,
-                history=history
+                question=question,
+                history=history,
+                memory_context=memory_context
             )
 
             result["answer_score"] = None
@@ -218,13 +256,17 @@ def ask(
 
         if route == "HYBRID":
             local_result = ask_local(
-                question=enriched_question,
-                history=history
+                question=question,
+                history=history,
+                memory_context=memory_context
             )
             result = _stage_openai_request(
                 "HYBRID",
                 build_hybrid_prompt(enriched_question, local_result["context"]),
-                local_result=local_result
+                local_result=local_result,
+                fallback_question=enriched_question,
+                fallback_history=history,
+                fallback_memory_context=memory_context
             )
 
             return attach_memory_metadata(
@@ -240,7 +282,10 @@ def ask(
 
             result = _stage_openai_request(
                 "CLOUD",
-                enriched_question
+                enriched_question,
+                fallback_question=enriched_question,
+                fallback_history=history,
+                fallback_memory_context=memory_context
             )
 
             return attach_memory_metadata(
@@ -267,8 +312,9 @@ def ask(
     if route == "LOCAL":
 
         local_result = ask_local(
-            question=enriched_question,
-            history=history
+            question=question,
+            history=history,
+            memory_context=memory_context
         )
 
         if not ENABLE_ANSWER_EVALUATION:
@@ -277,8 +323,10 @@ def ask(
             return attach_memory_metadata(local_result, memory_result)
 
         evaluation = evaluate_response(
-            question=enriched_question,
-            context=local_result["context"],
+            question=question,
+            context="\n\n".join(
+                part for part in (local_result["context"], memory_context) if part
+            ),
             answer=local_result["answer"]
         )
 
@@ -316,6 +364,9 @@ def ask(
                 "HYBRID",
                 build_hybrid_prompt(enriched_question, local_result["context"]),
                 local_result=local_result,
+                fallback_question=enriched_question,
+                fallback_history=history,
+                fallback_memory_context=memory_context,
                 answer_score=answer_score,
                 answer_route=recommended_route
             )
@@ -326,6 +377,10 @@ def ask(
             result = _stage_openai_request(
                 "CLOUD",
                 enriched_question,
+                fallback_result=local_result,
+                fallback_question=enriched_question,
+                fallback_history=history,
+                fallback_memory_context=memory_context,
                 answer_score=answer_score,
                 answer_route=recommended_route
             )
@@ -353,13 +408,17 @@ def ask(
     if route == "HYBRID":
 
         local_result = ask_local(
-            question=enriched_question,
-            history=history
+            question=question,
+            history=history,
+            memory_context=memory_context
         )
         result = _stage_openai_request(
             "HYBRID",
             build_hybrid_prompt(enriched_question, local_result["context"]),
-            local_result=local_result
+            local_result=local_result,
+            fallback_question=enriched_question,
+            fallback_history=history,
+            fallback_memory_context=memory_context
         )
 
         return attach_memory_metadata(
@@ -373,7 +432,10 @@ def ask(
 
     result = _stage_openai_request(
         "CLOUD",
-        enriched_question
+        enriched_question,
+        fallback_question=enriched_question,
+        fallback_history=history,
+        fallback_memory_context=memory_context
     )
 
     return attach_memory_metadata(

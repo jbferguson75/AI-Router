@@ -90,6 +90,15 @@ def test_app_cancel_does_not_send_pending_request(monkeypatch):
         "approve_openai_request",
         lambda _pending: sent.append("sent")
     )
+    monkeypatch.setattr(
+        orchestrator,
+        "cancel_openai_request",
+        lambda _pending: {
+            "route": "LOCAL",
+            "answer": "Answer from local documents",
+            "sources": []
+        }
+    )
     at = AppTest.from_file(str(APP_FILE)).run()
     at.chat_input[0].set_value("/cloud question").run()
 
@@ -98,7 +107,7 @@ def test_app_cancel_does_not_send_pending_request(monkeypatch):
     assert not at.exception
     assert sent == []
     assert at.session_state["pending_openai"] is None
-    assert any("OpenAI request cancelled" in item.value for item in at.markdown)
+    assert any("Answer from local documents" in item.value for item in at.markdown)
 
 
 def test_app_can_create_and_switch_saved_conversations(monkeypatch):

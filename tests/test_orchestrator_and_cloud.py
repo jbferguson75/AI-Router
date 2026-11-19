@@ -16,7 +16,12 @@ def local_result(answer="local", context="", sources=None):
 
 def prepare_orchestrator(monkeypatch):
     monkeypatch.setattr(orchestrator, "auto_remember", lambda _question: None)
-    monkeypatch.setattr(orchestrator, "inject_memory", lambda question: question)
+    monkeypatch.setattr(orchestrator, "build_memory_context", lambda _question: "")
+    monkeypatch.setattr(
+        orchestrator,
+        "inject_memory",
+        lambda question, **_kwargs: question
+    )
 
 
 @pytest.mark.parametrize(
@@ -54,8 +59,9 @@ def test_disabled_memory_switches_skip_extraction_and_injection(monkeypatch):
     )
     received = {}
 
-    def fake_local(question, history):
+    def fake_local(question, history, memory_context=""):
         received["question"] = question
+        received["memory_context"] = memory_context
         return local_result()
 
     monkeypatch.setattr(orchestrator, "ask_local", fake_local)
@@ -76,14 +82,16 @@ def test_memory_injection_is_used_when_enabled(monkeypatch):
     )
     received = {}
 
-    def fake_local(question, history):
+    def fake_local(question, history, memory_context=""):
         received["question"] = question
+        received["memory_context"] = memory_context
         return local_result()
 
     monkeypatch.setattr(orchestrator, "ask_local", fake_local)
     orchestrator.ask("question", route_override="LOCAL")
 
-    assert "owns a Corvette" in received["question"]
+    assert received["question"] == "question"
+    assert "owns a Corvette" in received["memory_context"]
 
 
 def test_disabling_answer_evaluation_keeps_local_answer(monkeypatch):
@@ -187,6 +195,72 @@ def test_approved_openai_request_is_sent_with_explicit_approval(monkeypatch):
     assert result["route"] == "HYBRID"
     assert result["answer"] == "answer"
     assert result["answer_score"] == 55
+
+
+def test_cancelled_hybrid_request_returns_staged_local_answer(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator,
+        "ask_cloud",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cancelled requests must not call OpenAI")
+        )
+    )
+    pending = {
+        "answer_score": 58,
+        "pending_openai": {
+            "local_fallback": local_result(
+                answer="Answer already prepared locally",
+                sources=[{"source_number": 1, "file": "notes.txt"}]
+            )
+        }
+    }
+
+    result = orchestrator.cancel_openai_request(pending)
+
+    assert result["route"] == "LOCAL"
+    assert result["answer_route"] == "LOCAL"
+    assert result["answer"] == "Answer already prepared locally"
+    assert result["sources"] == [{"source_number": 1, "file": "notes.txt"}]
+    assert result["answer_score"] == 58
+    assert result["confirmation_required"] is False
+
+
+def test_cancelled_cloud_request_asks_local_documents(monkeypatch):
+    prepare_orchestrator(monkeypatch)
+    received = {}
+
+    def fake_local(question, history, memory_context=""):
+        received["question"] = question
+        received["history"] = history
+        received["memory_context"] = memory_context
+        return local_result(answer="Local documents answer")
+
+    monkeypatch.setattr(orchestrator, "ask_local", fake_local)
+    monkeypatch.setattr(
+        orchestrator,
+        "ask_cloud",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cancelled requests must not call OpenAI")
+        )
+    )
+    history = [{"role": "user", "content": "Earlier question"}]
+
+    result = orchestrator.cancel_openai_request({
+        "memory_saved": None,
+        "memory_score": None,
+        "pending_openai": {
+            "fallback_question": "Current question",
+            "fallback_history": history
+        }
+    })
+
+    assert received == {
+        "question": "Current question",
+        "history": history,
+        "memory_context": ""
+    }
+    assert result["route"] == "LOCAL"
+    assert result["answer"] == "Local documents answer"
 
 
 def test_cloud_client_refuses_unapproved_requests(monkeypatch):

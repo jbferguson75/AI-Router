@@ -72,6 +72,10 @@ DOCUMENT_RESULTS = 3
 # Number of memories retrieved
 MEMORY_RESULTS = 5
 
+# Maximum Chroma distance for a remembered fact to be injected. Lower means
+# closer match; unrelated saved facts are omitted from the answer prompt.
+MEMORY_DISTANCE_THRESHOLD = 0.85
+
 # Number of messages to include in history
 CHAT_HISTORY_MESSAGES = 6
 
@@ -85,7 +89,7 @@ CHAT_HISTORY_MESSAGES = 6
 #
 
 # Strong document match
-LOCAL_THRESHOLD = 0.80
+LOCAL_THRESHOLD = 0.85
 
 # Moderate document match
 HYBRID_THRESHOLD = 1.20

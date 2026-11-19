@@ -3,7 +3,11 @@ import logging
 import streamlit as st
 
 import conversation_store
-from orchestrator import ask, approve_openai_request
+from orchestrator import (
+    ask,
+    approve_openai_request,
+    cancel_openai_request
+)
 
 from memory import (
     save_memory,
@@ -450,10 +454,27 @@ if st.session_state.pending_openai:
             st.rerun()
 
     if cancel_clicked:
+        try:
+            with st.spinner("Answering with local documents..."):
+                local_result = cancel_openai_request(pending)
+            answer = (
+                "**Route:** LOCAL\n\n"
+                f"{local_result['answer']}"
+            )
+            sources = local_result.get("sources", [])
+        except Exception:
+            logger.exception("Could not answer from local documents after cancellation")
+            answer = (
+                "**Route:** LOCAL\n\n"
+                "I couldn't complete a local answer. "
+                "The OpenAI request was cancelled and nothing was sent."
+            )
+            sources = []
+
         append_message({
             "role": "assistant",
-            "content": "OpenAI request cancelled. Nothing was sent.",
-            "sources": []
+            "content": answer,
+            "sources": sources
         })
         st.session_state.pending_openai = None
         conversation_store.set_pending_request(

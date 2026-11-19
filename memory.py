@@ -2,6 +2,7 @@ import uuid
 
 import chromadb
 from ollama_client import embed as ollama_embed
+from config import MEMORY_DISTANCE_THRESHOLD
 
 CHROMA_DB_DIR = "./chroma_db"
 MEMORY_COLLECTION_NAME = "memories"
@@ -29,6 +30,16 @@ def get_embedding(text):
     return response["embeddings"][0]
 
 
+def _is_reusable_memory(memory_text):
+    """Reject extraction explanations and query summaries as user facts."""
+    normalized = memory_text.strip().lower()
+    return not (
+        normalized.startswith("output:")
+        or normalized.startswith("user is inquiring")
+        or normalized.startswith("user is asking")
+    )
+
+
 def save_memory(
     memory_text,
     prevent_duplicates=True
@@ -36,7 +47,7 @@ def save_memory(
 
     memory_text = memory_text.strip()
 
-    if not memory_text:
+    if not memory_text or not _is_reusable_memory(memory_text):
         return False
 
     if prevent_duplicates:
@@ -83,7 +94,8 @@ def search_memory(
 
     results = memory_collection.query(
         query_embeddings=[embedding],
-        n_results=n_results
+        n_results=n_results,
+        include=["documents", "distances"]
     )
 
     docs = results.get(
@@ -91,10 +103,19 @@ def search_memory(
         []
     )
 
-    if not docs:
+    distances = results.get("distances", [])
+    if not docs or not distances:
         return []
 
-    return docs[0]
+    memories = []
+    for memory_text, distance in zip(docs[0], distances[0]):
+        if (
+            distance <= MEMORY_DISTANCE_THRESHOLD
+            and _is_reusable_memory(memory_text)
+        ):
+            memories.append(memory_text)
+
+    return memories
 
 
 def build_memory_context(

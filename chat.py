@@ -51,14 +51,32 @@ def get_embedding(text):
 # History Helpers
 # --------------------------------------------------
 
+def _usable_history(history):
+    """Drop UI notices and stale abstentions that can bias local answers."""
+    history = history or []
+    ignored_assistant_phrases = (
+        "openai approval is required",
+        "openai request cancelled",
+        "i don't know based on the provided documents",
+    )
+
+    return [
+        item for item in history
+        if not (
+            item.get("role") == "assistant"
+            and any(
+                phrase in item.get("content", "").lower()
+                for phrase in ignored_assistant_phrases
+            )
+        )
+    ]
+
 def build_search_query(
     question,
     history
 ):
 
-    history = history or []
-
-    recent = history[-CHAT_HISTORY_MESSAGES:]
+    recent = _usable_history(history)[-CHAT_HISTORY_MESSAGES:]
 
     parts = []
 
@@ -80,9 +98,7 @@ def format_history(
     history
 ):
 
-    history = history or []
-
-    recent = history[-CHAT_HISTORY_MESSAGES:]
+    recent = _usable_history(history)[-CHAT_HISTORY_MESSAGES:]
 
     parts = []
 
@@ -102,7 +118,8 @@ def format_history(
 def ask_local(
     question,
     history=None,
-    num_results=DOCUMENT_RESULTS
+    num_results=DOCUMENT_RESULTS,
+    memory_context=""
 ):
 
     if collection.count() == 0:
@@ -149,16 +166,19 @@ def ask_local(
         results["distances"][0]
     )
 
+    unique_chunks = []
+    seen_documents = set()
+    for doc, meta, distance in zip(documents, metadatas, distances):
+        normalized_doc = " ".join(doc.split()).casefold()
+        if normalized_doc in seen_documents:
+            continue
+        seen_documents.add(normalized_doc)
+        unique_chunks.append((doc, meta, distance))
+
     context_parts = []
 
-    for i, (
-        doc,
-        meta
-    ) in enumerate(
-        zip(
-            documents,
-            metadatas
-        ),
+    for i, (doc, meta, _distance) in enumerate(
+        unique_chunks,
         start=1
     ):
 
@@ -181,8 +201,8 @@ Chunk:
     )
 
     if DEBUG_RETRIEVAL:
-        print(f"[RETRIEVAL] returned {len(documents)} chunks")
-        for source, distance in zip(metadatas, distances):
+        print(f"[RETRIEVAL] returned {len(unique_chunks)} unique chunks")
+        for _doc, source, distance in unique_chunks:
             print(
                 f"[RETRIEVAL] {source['source']} "
                 f"chunk={source['chunk']} distance={distance:.4f}"
@@ -190,7 +210,7 @@ Chunk:
 
     prompt = f"""
 You are answering questions
-using retrieved documents.
+using the evidence provided below.
 
 Conversation:
 
@@ -200,15 +220,23 @@ Retrieved Context:
 
 {context}
 
+Known User Facts (also valid evidence):
+
+{memory_context or "No remembered user facts were retrieved."}
+
 Question:
 
 {question}
 
 Rules:
 
-1. Use only retrieved context.
-2. Cite using [SOURCE X]
-3. If unknown say:
+1. Use both Retrieved Context and Known User Facts as evidence.
+2. Treat titles and headings in retrieved documents as factual evidence.
+3. Preserve exact names, technical terms, numbers, and units from the evidence.
+   Do not replace a technical term with a similar-sounding guess.
+4. Cite document evidence using [SOURCE X]. Cite remembered facts using [MEMORY].
+5. If the evidence directly answers the question, answer in one or two concise sentences.
+6. If neither evidence section answers the question, say:
 
 I don't know based on
 the provided documents.
@@ -238,14 +266,8 @@ the provided documents.
 
     sources = []
 
-    for i, (
-        meta,
-        distance
-    ) in enumerate(
-        zip(
-            metadatas,
-            distances
-        ),
+    for i, (_doc, meta, distance) in enumerate(
+        unique_chunks,
         start=1
     ):
 
